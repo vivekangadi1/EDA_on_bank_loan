@@ -14,6 +14,12 @@ library(lubridate)
 library(scales)
 library(corrr)
 library(Hmisc)
+library(tidyquant)
+library(rsample)
+library(recipes)
+library(yardstick)
+library(corrr)
+
 #Reading the data
 
 
@@ -44,7 +50,6 @@ loan.removed.columns <-raw.loan.data %>% select(-c(total_il_high_credit_limit,to
                                                    num_accts_ever_120_pd,mths_since_last_record,mths_since_last_delinq))  
 
 glimpse(loan.removed.columns)
-write.csv(file = "loanremoved.csv",loan.removed.columns)
 
 
 missing_values <- loan.removed.columns %>% summarise_all(funs(sum(is.na(.))/n()))
@@ -65,6 +70,7 @@ clean.data <- loan.removed.columns %>% select(-c(tax_liens,initial_list_status,c
 good_features <- filter(missing_values,missing_percentage<0.15)
 good_features <- (good_features$feature)
 clean.data <- clean.data[,(colnames(clean.data) %in% good_features)]
+
 summary(clean.data)
 
 a <- clean.data %>%
@@ -76,7 +82,6 @@ nrow(clean.data)
 clean.data <- na.omit(clean.data)
 sum(is.na(clean.data))
 
-write.csv(file = "cleanedData.csv",clean.data)
 
 ggplot(clean.data,aes(x=factor(loan_status)))+geom_bar(stat='count',position = "dodge")
 ggplot(clean.data,aes(x=factor(loan_status),fill=factor(home_ownership)))+geom_bar(stat='count')
@@ -163,7 +168,7 @@ glimpse(clean.data)
 univariate_categorical(clean.data,clean.data$loan_status,"Default Distribution on status")
 
 univariate_categorical(clean.data,clean.data$purpose,"Default Distribution on status")
-univariate_categorical_fill(clean.data,clean.data$loan_status,clean.data$purpose,"fill based on purpose and loan status","purpose")
+univariate_categorical_fill(clean.data,clean.data$loan_status,clean.data$purpose,"Understanding the top contributor for defaulters","purpose")
 #from the above graph we see that debtconsolidation is the major purpose for the loan.
 #and most of the defaultors also in the debt consolidation brackect 
 #altought many of the debt consolidator have fully paid the loan
@@ -236,7 +241,7 @@ product_wise_fill(clean.data,clean.data$year,"purpose Distribution 2007-2011 bas
 
 
 
-product_wise_fill(clean.data,clean.data$grade,"")
+product_wise_fill(clean.data,clean.data$grade,"based on grade")
 #from the above graphs we also see the we can grant loan to e,f,g grade customer without much worry
 #as they have very less chance of getting chaged off from all the major groups.but the interesting 
 #observation here is all the grade from a-g in the group major_purchase,home_improvement,credit_Card
@@ -255,34 +260,30 @@ tapply(clean.data$int_rate,clean.data$purpose, mean)
 #there should be a stratergy drawn to solve this problem.either increase the interest
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 ##################################################################################################
-# Derivative metrics for the analysis
+# Derivative metrics for the analysis creating the bins for loan_amt,funded_amnt_inv,
+#int_rate,dti,funded_amnt,installment,annual_inc
 ##################################################################################################
 
 clean.data$bin_loan_amnt<-ifelse(clean.data$loan_amnt<=5000,"Small",
                            ifelse(clean.data$loan_amnt>5000 & clean.data$loan_amnt<=15000,"Medium",
                                   ifelse(clean.data$loan_amnt>15000 & clean.data$loan_amnt<=25000,"High","VeryHigh")))
+defaulte.clean.data <- filter(clean.data,clean.data$loan_status %in% c("Charged Off"))
+univariate_categorical(defaulte.clean.data,defaulte.clean.data$bin_loan_amnt,"bin based on loan amount and defaulters")
 
 
 clean.data$bin_funded_amnt_inv<-ifelse(clean.data$funded_amnt_inv<=5000,"Small",
                                  ifelse(clean.data$funded_amnt_inv>5000 & clean.data$funded_amnt_inv<=15000,"Medium",
                                         ifelse(clean.data$funded_amnt_inv>15000 & clean.data$funded_amnt_inv<=25000,"High","VeryHigh")))
 
+defaulte.clean.data <- filter(clean.data,clean.data$loan_status %in% c("Charged Off"))
+univariate_categorical(defaulte.clean.data,defaulte.clean.data$bin_funded_amnt_inv,"bin based on loan amount and defaulters")
+
 clean.data$bin_int_rate<-ifelse(clean.data$int_rate<=10,"Low_rate",
                           ifelse(clean.data$int_rate>10 & clean.data$int_rate<=15,"Medium_rate","High_rate"))
+
+defaulte.clean.data <- filter(clean.data,clean.data$loan_status %in% c("Charged Off"))
+univariate_categorical(defaulte.clean.data,defaulte.clean.data$bin_int_rate,"bin based on interest rate and defaulters")
 
 describe(clean.data$dti) 
 
@@ -303,12 +304,19 @@ clean.data$bin_installment<-ifelse(clean.data$installment<=200,"Small",
                              ifelse(clean.data$installment>200 & clean.data$installment<=400,"Medium",
                                     ifelse(clean.data$installment>400 & clean.data$installment<=600,"High","VeryHigh")))
 
+defaulte.clean.data <- filter(clean.data,clean.data$loan_status %in% c("Charged Off"))
+univariate_categorical(defaulte.clean.data,defaulte.clean.data$bin_installment,"bin based on installment and defaulters")
+
 describe(clean.data$annual_inc) 
 
 
 clean.data$bin_annual_inc<-ifelse(clean.data$annual_inc<=50000,"Small",
                             ifelse(clean.data$annual_inc>50000 & clean.data$annual_inc<=100000,"Medium",
                                    ifelse(clean.data$annual_inc>100000 & clean.data$annual_inc<=150000,"High","VeryHigh")))
+
+
+defaulte.clean.data <- filter(clean.data,clean.data$loan_status %in% c("Charged Off"))
+univariate_categorical(defaulte.clean.data,defaulte.clean.data$bin_annual_inc,"bin based on installment and defaulters")
 
 clean.data$emp_length <- extract_numeric(clean.data$emp_length)
 
@@ -335,7 +343,7 @@ product_wise_fill(clean.data,clean.data$emp_length,"Applicant Experience Distrib
 # "Major purchase" and "home improvement" were majorly approved for freshers(less than 1 year of experience)
 # Debt consolidation and credit card loans were majorly approved for experts(more than 10 years of experience)
 
-#################################################################################################
+###################################################################################################
 
 
 continuous_dist <- function(dataset,con_var,var_name){
@@ -356,11 +364,13 @@ continuous_dist(clean.data,clean.data$int_rate,"interest Distribution")
 continuous_dist(clean.data,clean.data$annual_inc,"annual Distribution")
 
 # Feature correlations to the purpose
-corr1 <- correlate(clean.data)
-
-correlation_plot<- function(pur){
+###################################################################################################
+#segmented analysis
+####################################################################################################
+correlation_plot<- function(pur,textforheading){
 clean.data.numeric <- pur
-clean.data.numeric$issue_d <- NULL
+
+clean.data.numeric$loan_status <- ifelse(clean.data.numeric$loan_status=="Charged Off",1,0)
 clean.data.numeric[sapply(clean.data.numeric, is.character)] <- lapply(clean.data.numeric[sapply(clean.data, is.character)], 
                                                                        as.factor)
 clean.data.numeric[sapply(clean.data.numeric, is.integer)] <- lapply(clean.data.numeric[sapply(clean.data, is.integer)], 
@@ -369,47 +379,109 @@ clean.data.numeric[sapply(clean.data.numeric, is.factor)] <- lapply(clean.data.n
                                            as.numeric)
 
 
-
 clean.data.numeric$issue_d <- NULL
+clean.data.numeric$sub_grade <- NULL
+clean.data.numeric$purpose <- NULL
+
+clean.data.numeric$loan_statusChrgedOff <- NULL
+clean.data.numeric$loan_statusCurrent <- NULL
+clean.data.numeric$pymnt_plan <- NULL
+clean.data.numeric$loan_amnt<-NULL
+clean.data.numeric$funded_amnt_inv <-NULL
+clean.data.numeric$dti<- NULL
+clean.data.numeric$funded_amnt <- NULL
+clean.data.numeric$installment <- NULL
+clean.data.numeric$annual_inc <- NULL
+clean.data.numeric$emp_length <- NULL
+clean.data.numeric$int_rate <- NULL
+
 
 corrr_analysis <- clean.data.numeric %>%
   correlate() %>%
-  focus(loan_statusNum) %>%
+  focus(loan_status) %>%
   rename(feature = rowname) %>%
-  arrange(abs(loan_statusNum)) %>%
+  arrange(abs(loan_status)) %>%
   mutate(feature = as.factor(feature)) 
 corrr_analysis
 
 # Correlation visualization
 plot <- corrr_analysis %>%
-  ggplot(aes(x = loan_statusNum, y = fct_reorder(feature, desc(loan_statusNum)))) +
+  ggplot(aes(x = loan_status, y = fct_reorder(feature, desc(loan_status)))) +
   geom_point() +
   # Positive Correlations - Contribute to churn
   geom_segment(aes(xend = 0, yend = feature), 
                color = palette_light()[[2]], 
-               data = corrr_analysis %>% filter(loan_statusNum > 0)) +
+               data = corrr_analysis %>% filter(loan_status > 0)) +
   geom_point(color = palette_light()[[2]], 
-             data = corrr_analysis %>% filter(loan_statusNum > 0)) +
+             data = corrr_analysis %>% filter(loan_status > 0)) +
   # Negative Correlations - Prevent churn
   geom_segment(aes(xend = 0, yend = feature), 
                color = palette_light()[[1]], 
-               data = corrr_analysis %>% filter(loan_statusNum < 0)) +
+               data = corrr_analysis %>% filter(loan_status < 0)) +
   geom_point(color = palette_light()[[1]], 
-             data = corrr_analysis %>% filter(loan_statusNum < 0)) +
+             data = corrr_analysis %>% filter(loan_status < 0)) +
   # Vertical lines
   geom_vline(xintercept = 0, color = palette_light()[[5]], size = 1, linetype = 2) +
   geom_vline(xintercept = -0.25, color = palette_light()[[5]], size = 1, linetype = 2) +
   geom_vline(xintercept = 0.25, color = palette_light()[[5]], size = 1, linetype = 2) +
   # Aesthetics
   theme_tq() +
-  labs(title = "Churn Correlation Analysis",
-       subtitle = "Positive Correlations (contribute to churn), Negative Correlations (prevent churn)",
+  labs(title = textforheading,
+       subtitle = "Positive Correlations (contribute to defaulters), Negative Correlations (prevent defaulter)",
        y = "Feature Importance")
 
 return(plot)
 }
 c("debt_consolidation","credit_card","home_improvement","major_purchase")
-correlation_plot(filter(clean.data,clean.data$purpose %in% c("major_purchase")))
-correlation_plot(filter(clean.data,clean.data$purpose %in% c("home_improvement")))
-correlation_plot(filter(clean.data,clean.data$purpose %in% c("credit_card")))
-correlation_plot(filter(clean.data,clean.data$purpose %in% c("debt_consolidation")))
+correlation_plot(filter(clean.data,clean.data$purpose %in% c("major_purchase")),"Correlation Analysis for major purchase")
+#payment plan is one of the most important correlation in all the observation. it is taking a major
+#contribution apart from that other major variables that contribute to correlation in 
+#major purchase are 
+# 1)recoverries
+# 2)collection_recovery_fee
+# 3)bin_int_rate
+# 4)grade
+# 5)bin_dti
+# 6)year
+# 7)home_ownership
+# 
+correlation_plot(filter(clean.data,clean.data$purpose %in% c("home_improvement")),"Correlation Analysis for home Improvement")
+#payment plan is one of the most important correlation in all the observation. it is taking a major
+#contribution apart from that other major variables that contribute to correlation in 
+#home improvement are 
+# 1)recoverries
+# 2)collection_recovery_fee
+# 3)bin_int_rate
+# 4)grade
+# 5)bin_funed_amt_invested
+# 6)term
+# 7)bin_dti
+# 
+correlation_plot(filter(clean.data,clean.data$purpose %in% c("credit_card")),"Correlation Analysis for Credit Card")
+#payment plan is one of the most important correlation in all the observation. it is taking a major
+#contribution apart from that other major variables that contribute to correlation in 
+#credit card are 
+# 1)recoverries
+# 2)bin_funed_amt_invested
+# 3)term
+# 4)collection_recovery_fee
+# 5)bin_dti
+# 6)bin_int_rate
+# 7)grade
+#
+correlation_plot(filter(clean.data,clean.data$purpose %in% c("debt_consolidation")),"Correlation Analysis for Debt Consolidation")
+#payment plan is one of the most important correlation in all the observation. it is taking a major
+#contribution apart from that other major variables that contribute to correlation in 
+#debt_consolidation are 
+# 1)recoverries
+# 2)term
+# 3)bin_dti
+# 4)bin_int_rate
+# 5)grade
+# 6)bin_funed_amt_invested
+# 7)collection_recovery_fee
+#
+
+correlation_plot(clean.data,"Correlation Analysis")
+clean.data$loan_status <- ifelse(clean.data$loan_status=="Charged Off",1,0)
+univariate_categorical(clean.data,clean.data$loan_status,"Deault Distribution of charged off and non chaged off")
